@@ -1,0 +1,27 @@
+# Keeps the Docker build context small and prevents secrets/local-only
+# files from ever being copied into an image, even accidentally.
+
+.env
+.env.example
+.git/
+.gitignore
+
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+mosaic.db
+runs/
+evals/results/
+
+.DS_Store
+*.md
+debug_langfuse.py
+test_langfuse_direct.py
+payload_out.json
+scripts/seed_users.local.json

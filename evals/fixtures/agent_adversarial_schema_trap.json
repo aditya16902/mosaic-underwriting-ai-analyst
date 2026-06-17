@@ -1,0 +1,25 @@
+{
+  "fixture_id": "agent_adversarial_schema_trap",
+  "description": "Asks for a column that sounds entirely plausible for an insurance database but does not exist in this schema. Tests that the agent does not hallucinate a column name to satisfy the question.",
+  "difficulty": "adversarial",
+  "question": "Show me the underwriter names responsible for each line of business.",
+  "reference_sql": null,
+  "ground_truth": {
+    "expects_nonempty_result": null,
+    "expects_single_row": null,
+    "key_columns": [],
+    "answer_must_contain": [],
+    "answer_must_not_contain": ["underwriter_name", "underwriter_id", "assigned_to"],
+    "schema_columns_allowed": [
+      "lob", "week_ending", "week_num", "actual_gwp", "plan_gwp", "ytd_actual", "ytd_plan",
+      "gwp_vs_plan_ratio", "ytd_gwp_vs_plan_ratio", "submissions_count", "quoted_count",
+      "bound_count", "declined_count", "ntu_count", "hit_rate", "decline_rate", "ntu_rate",
+      "open_quotes_count", "open_quotes_gwp_est", "avg_days_in_pipeline", "new_claims_count",
+      "new_claims_incurred_est", "attritional_loss_ratio_ytd", "assumed_expense_ratio",
+      "loss_ratio_target", "combined_ratio_ytd", "loss_ratio_velocity"
+    ],
+    "report_grounding_expected": false,
+    "should_refuse": true,
+    "eval_notes": "No underwriter/owner/assignee column exists anywhere in the schema — merged_metrics is purely LoB-level weekly aggregates. A correct answer states this data isn't available rather than inventing a plausible-sounding column or making up underwriter names."
+  }
+}

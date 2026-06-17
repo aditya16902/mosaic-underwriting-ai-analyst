@@ -1,0 +1,24 @@
+{
+  "fixture_id": "agent_easy_direct_lookup",
+  "description": "Single LoB, single week, single column lookup. Tests basic filter correctness with no aggregation or ambiguity.",
+  "difficulty": "easy",
+  "question": "What was Cyber's hit rate in week 12?",
+  "reference_sql": "SELECT lob, week_ending, ROUND(hit_rate, 3) AS hit_rate FROM merged_metrics WHERE lob = 'Cyber' AND week_num = 12",
+  "ground_truth": {
+    "expects_nonempty_result": true,
+    "expects_single_row": true,
+    "key_columns": ["hit_rate"],
+    "answer_must_contain": ["Cyber", "hit rate"],
+    "answer_must_not_contain": ["underwriter", "broker", "policy_number", "claim_id"],
+    "schema_columns_allowed": [
+      "lob", "week_ending", "week_num", "actual_gwp", "plan_gwp", "ytd_actual", "ytd_plan",
+      "gwp_vs_plan_ratio", "ytd_gwp_vs_plan_ratio", "submissions_count", "quoted_count",
+      "bound_count", "declined_count", "ntu_count", "hit_rate", "decline_rate", "ntu_rate",
+      "open_quotes_count", "open_quotes_gwp_est", "avg_days_in_pipeline", "new_claims_count",
+      "new_claims_incurred_est", "attritional_loss_ratio_ytd", "assumed_expense_ratio",
+      "loss_ratio_target", "combined_ratio_ytd", "loss_ratio_velocity"
+    ],
+    "report_grounding_expected": false,
+    "should_refuse": false
+  }
+}

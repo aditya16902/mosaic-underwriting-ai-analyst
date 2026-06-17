@@ -1,0 +1,3 @@
+Write a short summary about the insurance portfolio performance this week. Mention what went well and what did not go well. Keep it fairly brief and general. You do not need to include specific numbers if they are not important. Use a friendly and conversational tone. It is okay to speculate about possible reasons for performance. Try to be balanced and not too alarming even if things look bad.
+
+Return your response as an HTML page.

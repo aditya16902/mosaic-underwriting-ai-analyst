@@ -1,0 +1,82 @@
+{
+  "saved_at": "2026-06-17T07:27:48.991127Z",
+  "scores": {
+    "agent_adversarial_out_of_scope": {
+      "sql_validity": 1.0,
+      "schema_adherence": 1.0,
+      "sql_correctness": null,
+      "judge_overall": 1.0,
+      "answer_faithfulness": 1.0,
+      "report_grounding": 1.0,
+      "tone_directness": 1.0,
+      "specificity": 1.0,
+      "refusal_correctness": 1.0
+    },
+    "agent_adversarial_schema_trap": {
+      "sql_validity": 1.0,
+      "schema_adherence": 1.0,
+      "sql_correctness": null,
+      "judge_overall": 1.0,
+      "answer_faithfulness": 1.0,
+      "report_grounding": 1.0,
+      "tone_directness": 1.0,
+      "specificity": 1.0,
+      "refusal_correctness": 1.0
+    },
+    "agent_easy_direct_lookup": {
+      "sql_validity": 1.0,
+      "schema_adherence": 1.0,
+      "sql_correctness": 0.0,
+      "judge_overall": 0.98,
+      "answer_faithfulness": 1.0,
+      "report_grounding": 1.0,
+      "tone_directness": 0.85,
+      "specificity": 1.0,
+      "refusal_correctness": 1.0
+    },
+    "agent_hard_ambiguous": {
+      "sql_validity": 1.0,
+      "schema_adherence": 1.0,
+      "sql_correctness": 0.0,
+      "judge_overall": 1.0,
+      "answer_faithfulness": 1.0,
+      "report_grounding": 1.0,
+      "tone_directness": 1.0,
+      "specificity": 1.0,
+      "refusal_correctness": 1.0
+    },
+    "agent_hard_report_grounded": {
+      "sql_validity": 1.0,
+      "schema_adherence": 1.0,
+      "sql_correctness": 0.0,
+      "judge_overall": 0.88,
+      "answer_faithfulness": 0.6,
+      "report_grounding": 1.0,
+      "tone_directness": 1.0,
+      "specificity": 1.0,
+      "refusal_correctness": 1.0
+    },
+    "agent_medium_aggregation": {
+      "sql_validity": 1.0,
+      "schema_adherence": 1.0,
+      "sql_correctness": 1.0,
+      "judge_overall": 1.0,
+      "answer_faithfulness": 1.0,
+      "report_grounding": 1.0,
+      "tone_directness": 1.0,
+      "specificity": 1.0,
+      "refusal_correctness": 1.0
+    },
+    "agent_medium_trend": {
+      "sql_validity": 1.0,
+      "schema_adherence": 1.0,
+      "sql_correctness": 0.0,
+      "judge_overall": 0.85,
+      "answer_faithfulness": 0.6,
+      "report_grounding": 1.0,
+      "tone_directness": 1.0,
+      "specificity": 1.0,
+      "refusal_correctness": 1.0
+    }
+  }
+}

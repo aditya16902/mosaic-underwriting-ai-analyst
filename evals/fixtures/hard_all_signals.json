@@ -1,0 +1,46 @@
+{
+  "fixture_id": "hard_all_signals",
+  "description": "All four signals present simultaneously — the actual 12-week assessment dataset. Tests that LLM1 correctly prioritises among competing concerns and does not miss any signal. This is the primary regression fixture.",
+  "difficulty": "hard",
+  "week_count": 12,
+  "data": "USE_REAL_CSVS",
+  "ground_truth": {
+    "expected_signals": {
+      "S1_structural_underperformance": ["Excess Casualty"],
+      "S2_hit_rate_collapse": ["Cyber"],
+      "S3_loss_ratio_deterioration": ["Environmental"],
+      "S4_profitable_outperformance": ["Political Violence"]
+    },
+    "expected_top_concerns": [
+      {"rank": 1, "signal_id": "S3", "lob": "Environmental"},
+      {"rank": 2, "signal_id": "S1", "lob": "Excess Casualty"},
+      {"rank": 3, "signal_id": "S2", "lob": "Cyber"}
+    ],
+    "expected_top_opportunity": {"signal_id": "S4", "lob": "Political Violence"},
+    "narrative_must_contain": [
+      "Excess Casualty",
+      "Cyber",
+      "Environmental",
+      "Political Violence",
+      "loss ratio",
+      "hit rate",
+      "below plan",
+      "outperform"
+    ],
+    "narrative_must_not_contain": [
+      "it appears",
+      "might be",
+      "could potentially",
+      "it seems",
+      "may indicate"
+    ],
+    "numbers_to_verify": [
+      "74.5",
+      "811",
+      "10.4",
+      "668"
+    ],
+    "root_cause_expected": "LOSING_TO_PRICE",
+    "opportunity_health_expected": "HEALTHY_GROWTH"
+  }
+}

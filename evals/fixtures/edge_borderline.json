@@ -1,0 +1,46 @@
+{
+  "fixture_id": "edge_borderline",
+  "description": "Borderline cases: Environmental loss ratio just touching target (not breaching), Cyber hit rate drops 12pp (below 15pp threshold). Tests that the pipeline correctly does NOT fire signals that don't meet thresholds, and the LLM doesn't hallucinate concerns from marginal data.",
+  "difficulty": "edge",
+  "week_count": 9,
+  "data": "GENERATE_FROM_PARAMS",
+  "generation_params": {
+    "lobs_with_borderline": {
+      "Environmental": {
+        "note": "Loss ratio reaches exactly 0.55 (target) by week 9 — should NOT trigger S3",
+        "loss_ratio_trajectory": [0.50, 0.51, 0.51, 0.52, 0.52, 0.53, 0.53, 0.54, 0.55],
+        "gwp_ratio_flat": 1.00
+      },
+      "Cyber": {
+        "note": "Hit rate drops 12pp — below the 15pp absolute threshold — should NOT trigger S2",
+        "hit_rate_baseline": 0.30,
+        "hit_rate_window": 0.18,
+        "drop_pp": 0.12
+      }
+    },
+    "healthy_lobs": ["Excess Casualty", "Political Risk", "Political Violence", "Financial Institutions", "Professional Lines", "Transactional Liability"],
+    "healthy_gwp_ratio_range": [0.95, 1.08],
+    "healthy_loss_ratio_range": [0.40, 0.55]
+  },
+  "ground_truth": {
+    "expected_signals": {
+      "S1_structural_underperformance": [],
+      "S2_hit_rate_collapse": [],
+      "S3_loss_ratio_deterioration": [],
+      "S4_profitable_outperformance": []
+    },
+    "expected_top_concerns": [],
+    "expected_top_opportunity": null,
+    "narrative_must_contain": [
+      "no material concerns",
+      "portfolio performing"
+    ],
+    "narrative_must_not_contain": [
+      "Environmental loss ratio deteriorat",
+      "Cyber hit rate collapse",
+      "Excess Casualty below plan"
+    ],
+    "numbers_to_verify": [],
+    "eval_notes": "Primary test: pipeline silence when thresholds not met. LLM must not over-interpret marginal data as concerns."
+  }
+}

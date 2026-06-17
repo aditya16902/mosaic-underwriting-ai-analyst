@@ -1,0 +1,26 @@
+{
+  "fixture_id": "agent_medium_trend",
+  "description": "Multi-row trend across all 12 weeks for a single LoB. Tests correct ORDER BY and that the full range is returned, not truncated to one row.",
+  "difficulty": "medium",
+  "question": "Show me Excess Casualty's actual GWP versus plan for all 12 weeks.",
+  "reference_sql": "SELECT week_ending, actual_gwp, plan_gwp, ROUND(gwp_vs_plan_ratio, 3) AS gwp_vs_plan_ratio FROM merged_metrics WHERE lob = 'Excess Casualty' ORDER BY week_ending ASC",
+  "ground_truth": {
+    "expects_nonempty_result": true,
+    "expects_single_row": false,
+    "expected_row_count": 12,
+    "key_columns": ["actual_gwp", "plan_gwp"],
+    "answer_must_contain": ["Excess Casualty"],
+    "answer_must_not_contain": ["underwriter", "broker", "policy_number"],
+    "schema_columns_allowed": [
+      "lob", "week_ending", "week_num", "actual_gwp", "plan_gwp", "ytd_actual", "ytd_plan",
+      "gwp_vs_plan_ratio", "ytd_gwp_vs_plan_ratio", "submissions_count", "quoted_count",
+      "bound_count", "declined_count", "ntu_count", "hit_rate", "decline_rate", "ntu_rate",
+      "open_quotes_count", "open_quotes_gwp_est", "avg_days_in_pipeline", "new_claims_count",
+      "new_claims_incurred_est", "attritional_loss_ratio_ytd", "assumed_expense_ratio",
+      "loss_ratio_target", "combined_ratio_ytd", "loss_ratio_velocity"
+    ],
+    "report_grounding_expected": true,
+    "report_grounding_note": "Excess Casualty's structural GWP underperformance is a top-3 flagged concern in the report.",
+    "should_refuse": false
+  }
+}

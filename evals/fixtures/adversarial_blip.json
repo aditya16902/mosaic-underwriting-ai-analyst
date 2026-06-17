@@ -1,0 +1,51 @@
+{
+  "fixture_id": "adversarial_blip",
+  "description": "Single-week blip test: Cyber has one terrible week (week 8) then recovers fully in weeks 9-11. Tests that the rolling window logic correctly ignores the one-off and does NOT fire S2. Also tests with 9 weeks total to verify dynamic window sizing.",
+  "difficulty": "adversarial",
+  "week_count": 9,
+  "data": "GENERATE_FROM_PARAMS",
+  "generation_params": {
+    "lobs_with_blip": {
+      "Cyber": {
+        "note": "Hit rate is ~30% for weeks 1-7, drops to 5% in week 8 only, recovers to 28% in week 9. Rolling window (last 3 weeks of 9) should show recovery — S2 should NOT fire.",
+        "hit_rates_by_week": [0.31, 0.29, 0.32, 0.30, 0.31, 0.28, 0.30, 0.05, 0.28]
+      },
+      "Environmental": {
+        "note": "One large claim spike in week 6 — claims_incurred 10x normal — but YTD loss ratio stays below target. Anomaly should be flagged as CLAIMS_SPIKE, not S3.",
+        "normal_weekly_claims": 30000,
+        "spike_week": 6,
+        "spike_value": 320000,
+        "loss_ratio_ytd_stays_below": 0.55
+      }
+    },
+    "healthy_lobs": ["Excess Casualty", "Political Risk", "Political Violence", "Financial Institutions", "Professional Lines", "Transactional Liability"],
+    "healthy_gwp_ratio_range": [0.95, 1.08],
+    "healthy_loss_ratio_range": [0.40, 0.54]
+  },
+  "ground_truth": {
+    "expected_signals": {
+      "S1_structural_underperformance": [],
+      "S2_hit_rate_collapse": [],
+      "S3_loss_ratio_deterioration": [],
+      "S4_profitable_outperformance": []
+    },
+    "expected_anomalies": {
+      "claims_spikes": ["Environmental"],
+      "funnel_divergence": []
+    },
+    "expected_top_concerns": [],
+    "expected_top_opportunity": null,
+    "narrative_must_contain": [
+      "single",
+      "one-off",
+      "anomaly"
+    ],
+    "narrative_must_not_contain": [
+      "Cyber hit rate collapse",
+      "Environmental loss ratio deteriorat",
+      "sustained"
+    ],
+    "numbers_to_verify": [],
+    "eval_notes": "Critical test for the probing question: 'the narrative last week said Cyber was the top concern but the underwriter says it was a one-off'. This fixture proves the system handles it correctly."
+  }
+}

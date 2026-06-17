@@ -1,0 +1,60 @@
+{
+  "saved_at": "2026-06-16T18:12:30.221720Z",
+  "scores": {
+    "adversarial_blip": {
+      "pipeline_signal_recall": 1.0,
+      "llm1_overall": 0.06,
+      "llm1_signal_recall": 0.0,
+      "llm1_ranking": 0.0,
+      "llm1_faithfulness": 0.4,
+      "llm2_overall": 0.935,
+      "llm2_signal_accuracy": 1.0,
+      "llm2_faithfulness": 0.8,
+      "llm2_tone": 0.85
+    },
+    "easy_single_signal": {
+      "pipeline_signal_recall": 1.0,
+      "llm1_overall": 0.925,
+      "llm1_signal_recall": 1.0,
+      "llm1_ranking": 0.5,
+      "llm1_faithfulness": 0.8,
+      "llm2_overall": 0.975,
+      "llm2_signal_accuracy": 1.0,
+      "llm2_faithfulness": 1.0,
+      "llm2_tone": 1.0
+    },
+    "edge_borderline": {
+      "pipeline_signal_recall": 1.0,
+      "llm1_overall": 0.05,
+      "llm1_signal_recall": 1.0,
+      "llm1_ranking": 0.0,
+      "llm1_faithfulness": 0.0,
+      "llm2_overall": 1.0,
+      "llm2_signal_accuracy": 1.0,
+      "llm2_faithfulness": 1.0,
+      "llm2_tone": 1.0
+    },
+    "hard_all_signals": {
+      "pipeline_signal_recall": 1.0,
+      "llm1_overall": 0.825,
+      "llm1_signal_recall": 1.0,
+      "llm1_ranking": 0.5,
+      "llm1_faithfulness": 0.8,
+      "llm2_overall": 1.0,
+      "llm2_signal_accuracy": 1.0,
+      "llm2_faithfulness": 1.0,
+      "llm2_tone": 1.0
+    },
+    "medium_two_signals": {
+      "pipeline_signal_recall": 1.0,
+      "llm1_overall": 0.725,
+      "llm1_signal_recall": 1.0,
+      "llm1_ranking": 0.8,
+      "llm1_faithfulness": 1.0,
+      "llm2_overall": 0.975,
+      "llm2_signal_accuracy": 1.0,
+      "llm2_faithfulness": 1.0,
+      "llm2_tone": 1.0
+    }
+  }
+}

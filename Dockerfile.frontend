@@ -1,0 +1,35 @@
+# MosAIc frontend — Vite/React static build, served by nginx.
+#
+# IMPORTANT: VITE_API_BASE is baked into the JS bundle at BUILD time, not
+# read at container start. Vite inlines import.meta.env.* values during
+# `vite build` — there's no runtime env injection for a static build the
+# way a server-rendered app would have. This means the backend's URL must
+# be known when this image is built, via --build-arg, e.g.:
+#   docker build -f Dockerfile.frontend \
+#     --build-arg VITE_API_BASE=https://api.mosaic-demo.com \
+#     -t mosaic-frontend .
+# If the backend's URL changes later (e.g. a new ALB DNS name), this
+# image must be rebuilt — it can't be reconfigured by just restarting it.
+
+# ── Stage 1: build ──────────────────────────────────────────────────────────
+FROM node:20-slim AS build
+
+WORKDIR /app
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ .
+
+ARG VITE_API_BASE
+ENV VITE_API_BASE=${VITE_API_BASE}
+
+RUN npm run build
+
+# ── Stage 2: serve ──────────────────────────────────────────────────────────
+FROM nginx:1.27-alpine
+
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80

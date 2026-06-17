@@ -1,0 +1,26 @@
+{
+  "fixture_id": "agent_hard_report_grounded",
+  "description": "Question has no obvious single SQL answer — it asks 'why', requiring the agent to pull supporting data AND explicitly connect it to the report's existing narrative rather than just dumping numbers. Tests report_grounding more than raw SQL correctness.",
+  "difficulty": "hard",
+  "question": "Why is Cyber flagged as a concern in this week's report?",
+  "reference_sql": "SELECT week_ending, ROUND(hit_rate, 3) AS hit_rate FROM merged_metrics WHERE lob = 'Cyber' ORDER BY week_ending ASC",
+  "ground_truth": {
+    "expects_nonempty_result": true,
+    "expects_single_row": false,
+    "expected_row_count": 12,
+    "key_columns": ["hit_rate"],
+    "answer_must_contain": ["hit rate", "Cyber"],
+    "answer_must_not_contain": ["underwriter", "broker", "I don't know what the report said"],
+    "schema_columns_allowed": [
+      "lob", "week_ending", "week_num", "actual_gwp", "plan_gwp", "ytd_actual", "ytd_plan",
+      "gwp_vs_plan_ratio", "ytd_gwp_vs_plan_ratio", "submissions_count", "quoted_count",
+      "bound_count", "declined_count", "ntu_count", "hit_rate", "decline_rate", "ntu_rate",
+      "open_quotes_count", "open_quotes_gwp_est", "avg_days_in_pipeline", "new_claims_count",
+      "new_claims_incurred_est", "attritional_loss_ratio_ytd", "assumed_expense_ratio",
+      "loss_ratio_target", "combined_ratio_ytd", "loss_ratio_velocity"
+    ],
+    "report_grounding_expected": true,
+    "report_grounding_note": "Cyber's hit rate collapse is the report's #1 flagged concern (S2). A good answer must explicitly state this is why it's flagged, not just describe a trend in isolation.",
+    "should_refuse": false
+  }
+}

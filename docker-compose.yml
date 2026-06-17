@@ -1,0 +1,54 @@
+# Local-only stack for verifying both Dockerfiles work together before
+# touching AWS. Not used in production — ECS Fargate runs the backend and
+# frontend images separately, RDS replaces this Postgres container, and
+# secrets come from Secrets Manager instead of this file's environment
+# block. This exists purely so "docker compose up" proves the whole
+# containerized app works end to end on your machine first.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: mosaic
+    ports:
+      - "5432:5432"
+    volumes:
+      - mosaic_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:devpass@postgres:5432/mosaic
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      SECRET_KEY: ${SECRET_KEY:-mosaic-local-dev-secret-change-in-prod}
+      CORS_ORIGINS: http://localhost:5174
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_BASE: http://localhost:8000
+    ports:
+      - "5174:80"
+    depends_on:
+      - backend
+
+volumes:
+  mosaic_pg_data:

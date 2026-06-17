@@ -1,0 +1,35 @@
+# MosAIc backend — FastAPI service.
+# Multi-stage isn't needed here (no compiled assets to discard) but the
+# layer order is deliberate: dependencies install before the rest of the
+# code is copied in, so editing application code doesn't bust the pip
+# install cache on every rebuild — only requirements.txt changes do.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# psycopg2-binary doesn't need libpq-dev at install time, but pandas/numpy/
+# scipy wheels for slim images sometimes still want basic build tooling
+# present as a fallback if a wheel isn't available for this exact platform.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Application code
+COPY backend/ backend/
+COPY scripts/ scripts/
+COPY data/ data/
+COPY main.py .
+
+# NOT copied: .env (secrets come from the container's environment at
+# runtime, injected by ECS/Fargate from Secrets Manager — never baked
+# into the image), mosaic.db (local SQLite file — irrelevant once
+# DATABASE_URL points at RDS), runs/ (ephemeral — moves to S3).
+
+EXPOSE 8000
+
+# No --reload in production — that's a dev-only watcher and adds overhead.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

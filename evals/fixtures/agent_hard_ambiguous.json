@@ -1,0 +1,26 @@
+{
+  "fixture_id": "agent_hard_ambiguous",
+  "description": "Vague, conversational phrasing with no exact column mapping. Tests whether the agent makes a reasonable, defensible interpretive choice (e.g. portfolio-wide GWP vs plan as a proxy for 'how are we doing') rather than hallucinating a metric that doesn't exist or refusing outright.",
+  "difficulty": "hard",
+  "question": "How is the portfolio doing overall this week?",
+  "reference_sql": "SELECT lob, ROUND(gwp_vs_plan_ratio, 3) AS gwp_vs_plan_ratio, ROUND(attritional_loss_ratio_ytd, 3) AS loss_ratio FROM merged_metrics WHERE week_ending = (SELECT MAX(week_ending) FROM merged_metrics) ORDER BY lob",
+  "ground_truth": {
+    "expects_nonempty_result": true,
+    "expects_single_row": false,
+    "key_columns": ["gwp_vs_plan_ratio", "attritional_loss_ratio_ytd"],
+    "answer_must_contain": [],
+    "answer_must_not_contain": ["underwriter", "broker", "policy_number", "I cannot answer"],
+    "schema_columns_allowed": [
+      "lob", "week_ending", "week_num", "actual_gwp", "plan_gwp", "ytd_actual", "ytd_plan",
+      "gwp_vs_plan_ratio", "ytd_gwp_vs_plan_ratio", "submissions_count", "quoted_count",
+      "bound_count", "declined_count", "ntu_count", "hit_rate", "decline_rate", "ntu_rate",
+      "open_quotes_count", "open_quotes_gwp_est", "avg_days_in_pipeline", "new_claims_count",
+      "new_claims_incurred_est", "attritional_loss_ratio_ytd", "assumed_expense_ratio",
+      "loss_ratio_target", "combined_ratio_ytd", "loss_ratio_velocity"
+    ],
+    "report_grounding_expected": true,
+    "report_grounding_note": "A strong answer summarises portfolio health touching on the report's known concerns/opportunity rather than reading like a disconnected data dump.",
+    "should_refuse": false,
+    "eval_notes": "This fixture deliberately has no single 'correct' SQL — reference_sql is one reasonable interpretation (portfolio snapshot for latest week). The judge should accept any reasonable query that surfaces portfolio-wide health metrics for the latest or recent period, not penalise stylistic deviation from the reference."
+  }
+}

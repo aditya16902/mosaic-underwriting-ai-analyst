@@ -1,0 +1,29 @@
+# ── Secrets ────────────────────────────────────────────────────────────────
+.env
+*.pem
+*.key
+scripts/seed_users.local.json
+
+# ── Python ─────────────────────────────────────────────────────────────────
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# ── Node / frontend ────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+
+# ── Generated application data (regenerable / per-environment) ─────────────
+mosaic.db
+runs/
+evals/results/
+
+# ── OS / editor cruft ─────────────────────────────────────────────────────
+.DS_Store
+.vscode/
+.idea/

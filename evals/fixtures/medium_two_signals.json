@@ -1,0 +1,54 @@
+{
+  "fixture_id": "medium_two_signals",
+  "description": "S1 (Excess Casualty underperformance) + S3 (Environmental loss ratio creep). No hit rate collapse, no outperformance opportunity. Tests that LLM1 handles two simultaneous concerns and correctly finds no opportunity.",
+  "difficulty": "medium",
+  "week_count": 12,
+  "data": "GENERATE_FROM_PARAMS",
+  "generation_params": {
+    "lobs_with_signals": {
+      "Excess Casualty": {
+        "signal": "S1",
+        "gwp_ratio_range": [0.52, 0.68],
+        "loss_ratio_flat": 0.52
+      },
+      "Environmental": {
+        "signal": "S3",
+        "gwp_ratio_flat": 1.00,
+        "loss_ratio_start": 0.53,
+        "loss_ratio_end": 0.72,
+        "deterioration_starts_week": 5
+      }
+    },
+    "healthy_lobs": ["Cyber", "Political Risk", "Political Violence", "Financial Institutions", "Professional Lines", "Transactional Liability"],
+    "healthy_gwp_ratio_range": [0.95, 1.05],
+    "healthy_loss_ratio_range": [0.40, 0.55]
+  },
+  "ground_truth": {
+    "expected_signals": {
+      "S1_structural_underperformance": ["Excess Casualty"],
+      "S2_hit_rate_collapse": [],
+      "S3_loss_ratio_deterioration": ["Environmental"],
+      "S4_profitable_outperformance": []
+    },
+    "expected_top_concerns": [
+      {"rank": 1, "signal_id": "S3", "lob": "Environmental"},
+      {"rank": 2, "signal_id": "S1", "lob": "Excess Casualty"}
+    ],
+    "expected_top_opportunity": null,
+    "narrative_must_contain": [
+      "Excess Casualty",
+      "Environmental",
+      "loss ratio",
+      "below plan"
+    ],
+    "narrative_must_not_contain": [
+      "hit rate collapse",
+      "Cyber concern",
+      "outperform",
+      "it appears",
+      "may indicate"
+    ],
+    "numbers_to_verify": [],
+    "root_cause_expected": "LOSING_TO_PRICE"
+  }
+}

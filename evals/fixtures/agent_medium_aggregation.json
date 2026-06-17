@@ -1,0 +1,26 @@
+{
+  "fixture_id": "agent_medium_aggregation",
+  "description": "Cross-LoB aggregation requiring ORDER BY + LIMIT to find a maximum. Tests correct ranking logic, not just filtering.",
+  "difficulty": "medium",
+  "question": "Which line of business had the highest loss ratio in the latest week?",
+  "reference_sql": "SELECT lob, ROUND(attritional_loss_ratio_ytd, 3) AS loss_ratio FROM merged_metrics WHERE week_ending = (SELECT MAX(week_ending) FROM merged_metrics) ORDER BY attritional_loss_ratio_ytd DESC LIMIT 1",
+  "ground_truth": {
+    "expects_nonempty_result": true,
+    "expects_single_row": true,
+    "key_columns": ["lob", "attritional_loss_ratio_ytd"],
+    "expected_top_lob": "Environmental",
+    "answer_must_contain": ["Environmental", "loss ratio"],
+    "answer_must_not_contain": ["underwriter", "broker", "region"],
+    "schema_columns_allowed": [
+      "lob", "week_ending", "week_num", "actual_gwp", "plan_gwp", "ytd_actual", "ytd_plan",
+      "gwp_vs_plan_ratio", "ytd_gwp_vs_plan_ratio", "submissions_count", "quoted_count",
+      "bound_count", "declined_count", "ntu_count", "hit_rate", "decline_rate", "ntu_rate",
+      "open_quotes_count", "open_quotes_gwp_est", "avg_days_in_pipeline", "new_claims_count",
+      "new_claims_incurred_est", "attritional_loss_ratio_ytd", "assumed_expense_ratio",
+      "loss_ratio_target", "combined_ratio_ytd", "loss_ratio_velocity"
+    ],
+    "report_grounding_expected": true,
+    "report_grounding_note": "Environmental's deteriorating loss ratio is one of the report's flagged concerns — a good answer connects this lookup back to that finding.",
+    "should_refuse": false
+  }
+}
