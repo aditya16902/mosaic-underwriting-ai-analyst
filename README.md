@@ -2,7 +2,7 @@
 
 MosAIc is a weekly underwriting performance intelligence platform built for Mosaic Insurance (Lloyd's syndicates 1609 and 2610, eight lines of business). It ingests four weekly CSV feeds, detects four categories of underwriting signal, enriches each with a date-disclosed root cause, ranks them through a two-stage LLM chain, and produces three outputs per run: a dashboard, a CUO-style narrative briefing, and a downloadable audit snapshot. A text-to-SQL chat agent sits alongside the dashboard so a user can ask follow-up questions in plain English against that run's data.
 
-## Setup
+## Setup (local, no Docker)
 
 ```bash
 cd /Users/aditya16902/Desktop/Github/Mosaic
@@ -15,16 +15,25 @@ Add keys to `.env` (see `.env.example`):
 
 ```
 OPENAI_API_KEY=sk-...
-LANGFUSE_PUBLIC_KEY=pk-lf-...     # optional — enables tracing
-LANGFUSE_SECRET_KEY=sk-lf-...     # optional
 SECRET_KEY=...                    # JWT signing key — set a real value outside localhost
 CORS_ORIGINS=http://localhost:5173,http://localhost:3000   # comma-separated, defaults to local dev
+# DATABASE_URL=...                # leave unset locally — defaults to a SQLite file; see Database section
+LANGFUSE_PUBLIC_KEY=pk-lf-...     # optional — enables tracing
+LANGFUSE_SECRET_KEY=sk-lf-...     # optional
 ```
 
-Initialise the database (creates tables, seeds `admin`/`admin123`, seeds default schedule):
+Initialise the database (creates tables, seeds the default schedule — does **not** create any user):
 
 ```bash
 python -m backend.db.database
+```
+
+Create real user accounts (there is no hardcoded username/password anywhere in the codebase — see Auth & Users below):
+
+```bash
+cp scripts/seed_users.example.json scripts/seed_users.local.json
+# edit seed_users.local.json with real username/password/display_name entries
+python -m scripts.seed_users
 ```
 
 Frontend:
@@ -41,6 +50,33 @@ Backend:
 uvicorn main:app --reload --port 8000
 # equivalently: uvicorn backend.api.routes:app --reload --port 8000
 ```
+
+---
+
+## Setup (Docker, local)
+
+A `docker-compose.yml` at the project root runs the full stack — backend, frontend (built and served by nginx), and a local Postgres container — so the containerized app can be verified end to end before anything touches AWS. This is for local verification only; it is **not** what runs in production. On AWS, ECS Fargate runs the backend and frontend images separately, RDS replaces the Postgres container, and secrets come from Secrets Manager rather than this file's environment block.
+
+```bash
+docker compose up --build
+```
+
+Frontend: `http://localhost:5174` (intentionally not 5173, so it doesn't collide if `npm run dev` is also running). Backend: `http://localhost:8000`. The Postgres container starts empty — seed it the same way as local dev, just pointed at the container instead of the local SQLite file:
+
+```bash
+export DATABASE_URL="postgresql+psycopg2://postgres:devpass@localhost:5432/mosaic"
+python -m scripts.seed_users
+```
+
+Two Dockerfiles exist rather than one, since the two services have nothing in common at build time: `Dockerfile.backend` installs `requirements.txt` and runs uvicorn directly. `Dockerfile.frontend` is a two-stage build — stage one runs `npm run build` inside a Node image, stage two copies just the resulting static files into an nginx image and discards the Node toolchain entirely, so the final image is small and contains no source code, only built assets. `nginx.conf` adds the one thing a plain static file server doesn't do by default: falling back to `index.html` for any path that doesn't match a real file, which is required for React Router's client-side routes (`/reports/:runId`) to survive a page refresh rather than 404ing.
+
+One constraint worth knowing: `VITE_API_BASE` (the backend URL the frontend calls) is baked into the JS bundle at **build** time, not read at container start — Vite inlines `import.meta.env.*` values during `vite build`, and a static build has no equivalent of a server reading an env var at runtime. This means if the backend's URL ever changes (a new load balancer DNS name, a new domain), the frontend image needs rebuilding with a new `--build-arg VITE_API_BASE=...`, not just restarting.
+
+---
+
+## Dependency management
+
+`requirements.txt` is the hand-curated source of truth — pinned top-level packages only, not a `pip freeze` dump of every transitive dependency pip happened to resolve. This stays readable and makes it clear which packages the app actually depends on versus what something else pulled in. **uv is not currently used in this project** — it was discussed as a faster, lockfile-based alternative to plain pip (uv generates a `uv.lock` with exact, hashed versions of every package including transitive deps, on top of the same human-readable top-level list), but adopting it was deferred rather than implemented, since the existing pinned `requirements.txt` was already sufficient for this project's size and switching mid-build risked destabilising a working setup for marginal benefit at three users. Worth revisiting if dependency resolution ever becomes slow or flaky, but as of this writing, `pip install -r requirements.txt` is what both local dev and `Dockerfile.backend` use.
 
 ---
 
@@ -64,7 +100,7 @@ Each weekly run flows through five backend layers, then a packaging layer, then 
 
 **Layer 5 — Two-LLM chain (`backend/llm/chain.py`).** LLM1 (`gpt-4o-mini`, low temperature) receives the full payload and returns a structured JSON prioritisation: top 3 concerns ranked, top opportunity, one-line rationales, analyst notes. LLM2 (`gpt-4o`) receives the same payload plus LLM1's output and writes the full CUO narrative briefing as standalone HTML — instructed to disclose methodology (name the actual window/dates whenever a figure is windowed rather than full-period) and show calculation derivations for financial figures, mirroring the same discipline enforced in Layer 3a. Both calls are traced to Langfuse when configured (see Observability below).
 
-**Packaging (`backend/report/snapshot.py`).** Every run writes a full audit bundle to `runs/{run_id}/`: the raw CSVs as fed in, `merged_metrics.xlsx` (formatted), `merged_metrics.db` (SQLite, used by the chat agent), the LLM1 input/output JSON, both prompt text files actually used, a markdown `signals_and_enrichment.md` audit document, the narrative HTML, `dashboard_data.json`, and finally a zip of everything in the directory. The zip is built last and simply archives every file already present — there's no allowlist, so anything written earlier in the run is automatically included.
+**Packaging (`backend/report/snapshot.py`).** Every run writes a full audit bundle to `runs/{run_id}/`: the raw CSVs as fed in, `merged_metrics.xlsx` (formatted), `merged_metrics.db` (SQLite, used by the chat agent — this is a separate, per-run file, unrelated to the application's own SQLite/Postgres database described below), the LLM1 input/output JSON, both prompt text files actually used, a markdown `signals_and_enrichment.md` audit document, the narrative HTML, `dashboard_data.json`, and finally a zip of everything in the directory. The zip is built last and simply archives every file already present — there's no allowlist, so anything written earlier in the run is automatically included.
 
 **Run IDs** use the format `YYYYMMDD_HHMMSS_week<report_week>_<4hexsuffix>` — sortable and human-scannable, generated in `backend/pipeline/orchestrator.py`.
 
@@ -72,7 +108,19 @@ Each weekly run flows through five backend layers, then a packaging layer, then 
 
 ## Database
 
-SQLite locally (`mosaic.db`), intended to move to Postgres on AWS (`backend/db/database.py` already isolates all access behind `get_connection()`, so the migration is a connection-string change, not a rewrite). Three tables: `users` (single seeded admin account, sha256-hashed password — see Known Limitations), `reports` (one row per run: run_id, week range, status, source `manual`/`automated`, and JSON blobs of signals/concerns/opportunities/anomalies for fast history listing without touching the filesystem), and `schedule_config` (single-row table holding the automated report cadence).
+Runs against either SQLite or Postgres with the **same SQL**, via SQLAlchemy Core (`backend/db/database.py`) — not an ORM, no migration framework, just enough abstraction to handle the real differences between the two engines (parameter placeholders, autoincrement/identity syntax, upsert syntax, schema introspection) without maintaining two parallel implementations. Controlled by a single env var: `DATABASE_URL` unset defaults to a local SQLite file (`mosaic.db`), set to a Postgres connection string (`postgresql+psycopg2://user:pass@host:5432/dbname`) switches everything — local dev, Docker Compose, and AWS RDS — to Postgres with no code changes. This was validated locally against a real Postgres container before being used in `docker-compose.yml`.
+
+Three tables: `users` (real named accounts, bcrypt-hashed passwords — see Auth & Users below), `reports` (one row per run: run_id, week range, status, source `manual`/`automated`, and JSON blobs of signals/concerns/opportunities/anomalies for fast history listing without touching the filesystem), and `schedule_config` (single-row table holding the automated report cadence).
+
+---
+
+## Auth & users
+
+There is no hardcoded username or password anywhere in the codebase. Passwords are bcrypt-hashed via `passlib` (`backend/auth/passwords.py`) — a real salted, slow-by-design hashing scheme, not the unsalted SHA-256 this app used in an earlier iteration. Login (`POST /auth/login`) verifies against a dummy hash even when the username doesn't exist, so response timing can't be used to enumerate valid accounts.
+
+Accounts are created with `scripts/seed_users.py`, which reads plaintext credentials from a **local, gitignored** file (`scripts/seed_users.local.json` — never committed; `scripts/seed_users.example.json` is the safe-to-commit placeholder template) and writes bcrypt hashes into the `users` table. Re-running the script is safe and idempotent — it upserts by username, so it's also how a password gets rotated. The same script works against Postgres by exporting `DATABASE_URL` first, which is how the three real accounts get created in any new environment (Docker Compose's Postgres container, RDS on AWS) — seed once per database, not once per environment file.
+
+The frontend has a real login page (`frontend/src/pages/LoginPage.tsx`) with a show/hide toggle on the password field. There is no auto-login and no demo credential anywhere in frontend code.
 
 ---
 
@@ -81,8 +129,8 @@ SQLite locally (`mosaic.db`), intended to move to Postgres on AWS (`backend/db/d
 All routes except `/auth/login` and `/health` require a bearer JWT. Two routes (`narrative`, `snapshot/zip`) also accept the token as a `?token=` query param via `verify_token_flexible`, since browser-initiated downloads/`window.open` can't attach an Authorization header.
 
 ```
-POST   /auth/login                              admin/admin123 → JWT
-GET    /auth/me
+POST   /auth/login                              {username, password} → JWT
+GET    /auth/me                                  current user's username + display_name
 GET    /data/bounds                              min/max week available, for the date picker
 POST   /reports/generate                         {week_start?, week_end?} → runs the full pipeline
 GET    /reports                                  history list
@@ -102,7 +150,7 @@ GET    /health
 
 ## Text-to-SQL chat agent
 
-`backend/agents/text_to_sql/agent.py` takes a natural-language question, generates SQL against that run's `merged_metrics.db` (or the latest run if none specified), executes it through a hardened executor, and interprets the result back into a business-language answer. `sql_executor.py` only permits `SELECT` against the `merged_metrics` table, blocks DDL/DML keywords, and caps results at 500 rows. Prompts are versioned (`sql_gen_v1`/`v2`, `sql_interpret_v1`/`v2` — v2 are intentionally degraded prompts used only to validate that the eval framework actually detects regressions).
+`backend/agents/text_to_sql/agent.py` takes a natural-language question, generates SQL against that run's `merged_metrics.db` (or the latest run if none specified), executes it through a hardened executor, and interprets the result back into a business-language answer. `sql_executor.py` only permits `SELECT` against the `merged_metrics` table, blocks DDL/DML keywords, and caps results at 500 rows. Prompts are versioned (`sql_gen_v1`/`v2`, `sql_interpret_v1`/`v2` — v2 are intentionally degraded prompts used only to validate that the eval framework actually detects regressions). This agent's database is always SQLite regardless of what `DATABASE_URL` is set to — it's a self-contained per-run artifact, not the application's database, and is unaffected by the SQLite/Postgres switch described above.
 
 ---
 
@@ -130,7 +178,7 @@ Two separate Langfuse client instances exist by design, not by accident: `backen
 
 React + Vite + TypeScript + Tailwind. Paper-and-ledger visual design: warm off-white background, a signature colored "severity rail" down the left edge of concern cards and history rows, Source Serif for display type, Inter for body text, JetBrains Mono for all numeric values.
 
-Key structure: `lib/api.ts` (typed fetch wrapper, JWT-aware), `lib/types.ts` (mirrors backend response shapes exactly), `lib/reportEvents.ts` (a tiny pub/sub so the sidebar's report history refetches immediately after a new report is generated or deleted, without prop-drilling through `App.tsx`), `components/dashboard/*` (portfolio header, concern cards with expandable root-cause detail, LoB table, GWP trend chart, hit-rate heatmap, anomalies section), `components/layout/Sidebar.tsx` (report history with inline two-step delete confirmation, severity rail per row), `components/layout/ResizableChatPanel.tsx` (VS Code-style drag-resizable chat panel hosting the agent).
+Key structure: `pages/LoginPage.tsx` (real login form, no auto-login), `lib/auth.ts` (login/logout/session-check, no hardcoded credentials), `lib/api.ts` (typed fetch wrapper, JWT-aware), `lib/types.ts` (mirrors backend response shapes exactly), `lib/reportEvents.ts` (a tiny pub/sub so the sidebar's report history refetches immediately after a new report is generated or deleted, without prop-drilling through `App.tsx`), `components/dashboard/*` (portfolio header, concern cards with expandable root-cause detail, LoB table, GWP trend chart, hit-rate heatmap, anomalies section), `components/layout/Sidebar.tsx` (report history with inline two-step delete confirmation, severity rail per row, signed-in-as display name with sign-out), `components/layout/ResizableChatPanel.tsx` (VS Code-style drag-resizable chat panel hosting the agent).
 
 The GWP trend chart and hit-rate heatmap consume the pipeline's `weekly_series` field directly. Both gracefully no-op (rather than crash) on reports generated before this field existed, via `data.weekly_series ?? []`.
 
@@ -138,19 +186,13 @@ The GWP trend chart and hit-rate heatmap consume the pipeline's `weekly_series` 
 
 ## Known limitations
 
-Password hashing uses unsalted `hashlib.sha256`, not bcrypt/argon2 — acceptable for this single-seeded-user (`admin`/`admin123`) assessment demo, but should be hardened with a proper salted scheme (e.g. passlib + bcrypt, or argon2) before any real multi-user deployment. The local scheduler (`APScheduler`, started in-process by `backend/api/routes.py::_start_scheduler`) only fires while the FastAPI process is running and is explicitly intended to be replaced by an AWS EventBridge rule invoking a Lambda/Fargate task directly — that's a clean removal, not a refactor, when the time comes. `DELETE /reports/{run_id}` is genuinely irreversible (it runs `shutil.rmtree` on the run directory) — there's no soft-delete or trash state.
+The local scheduler (`APScheduler`, started in-process by `backend/api/routes.py::_start_scheduler`) only fires while the FastAPI process is running and is explicitly intended to be replaced by an AWS EventBridge rule invoking a Lambda/Fargate task directly — that's a clean removal, not a refactor, when the time comes. `DELETE /reports/{run_id}` is genuinely irreversible (it runs `shutil.rmtree` on the run directory) — there's no soft-delete or trash state. The `runs/` directory (every report's raw CSVs, narrative, snapshot zip) lives on local disk, which is fine for local dev and Docker Compose but won't survive on Fargate's ephemeral container filesystem — this needs to move to S3 before the backend runs on Fargate, and is tracked as upcoming work, not yet implemented.
 
 ---
 
 ## Pre-deployment hygiene
 
-`.gitignore` now excludes `.env`, `venv/`, `frontend/node_modules/`, `frontend/dist/`, `mosaic.db`, `runs/`, and `evals/results/` (deliberately not `evals/baselines/` or `evals/fixtures/`, which are reference data meant to be version-controlled). CORS origins and the JWT signing key are both environment-driven (`CORS_ORIGINS`, `SECRET_KEY` in `.env`) rather than hardcoded — a startup warning prints if `SECRET_KEY` is left at its default dev value. Docker/AWS infrastructure itself (Dockerfiles, ECS/Fargate task definitions, EventBridge rules, RDS migration) is intentionally out of scope for this pass — these env-driven config points exist so that work can proceed without first refactoring hardcoded values.
-
-A few files predate this cleanup pass and need manual removal (no file-delete capability is available to make these edits directly): `debug_langfuse.py`, `test_langfuse_direct.py`, and `payload_out.json` at the project root were one-off diagnostic scripts/output from earlier debugging sessions, and `frontend/tsconfig.app.json` is an orphaned stray file never referenced by the actual build config. Run:
-
-```bash
-rm debug_langfuse.py test_langfuse_direct.py payload_out.json frontend/tsconfig.app.json
-```
+`.gitignore` excludes `.env`, `venv/`, `frontend/node_modules/`, `frontend/dist/`, `mosaic.db`, `runs/`, `evals/results/`, and `scripts/seed_users.local.json` (deliberately not `evals/baselines/`, `evals/fixtures/`, or `scripts/seed_users.example.json`, which are reference data/templates meant to be version-controlled). `.dockerignore` excludes the same local-only files from ever entering a Docker build context. CORS origins, the JWT signing key, and the database connection string are all environment-driven (`CORS_ORIGINS`, `SECRET_KEY`, `DATABASE_URL`) rather than hardcoded — a startup warning prints if `SECRET_KEY` is left at its default dev value.
 
 ---
 
@@ -190,6 +232,15 @@ cd frontend && npm run dev
 
 # Backend dev server
 uvicorn main:app --reload --port 8000
+
+# Full containerized stack (backend + frontend + Postgres)
+docker compose up --build
 ```
 
-Manual checks worth doing after any frontend/backend change: generate a report, confirm it appears in history immediately; delete a report, confirm it disappears and (if it was the one on screen) the view redirects; ask the chat agent a question grounded in the current report and one slightly out of scope; open the narrative and download the snapshot zip via the buttons (these use `?token=` auth, distinct from the rest of the app); change and save the schedule settings.
+Manual checks worth doing after any frontend/backend change: log in with a real seeded account; generate a report, confirm it appears in history immediately; delete a report, confirm it disappears and (if it was the one on screen) the view redirects; ask the chat agent a question grounded in the current report and one slightly out of scope; open the narrative and download the snapshot zip via the buttons (these use `?token=` auth, distinct from the rest of the app); change and save the schedule settings; sign out and confirm the login page reappears rather than silently re-authenticating.
+
+---
+
+## AWS deployment status
+
+Stages completed so far, in order: (1) database layer migrated to run against either SQLite or Postgres via the same code, validated against a real local Postgres container; (2) both services Dockerized (`Dockerfile.backend`, `Dockerfile.frontend`, `nginx.conf`) and verified together via `docker-compose.yml`; (3) git initialized, secrets confirmed excluded, pushed to a remote. Not yet done: provisioning real AWS resources (ECR, RDS, S3 for the `runs/` directory, Secrets Manager), wiring ECS Fargate + EventBridge + CloudFront, and the S3 migration for run artifacts noted under Known Limitations above.
