@@ -20,6 +20,22 @@ DB_PATH  = BASE_DIR / "mosaic.db"
 # against either backend — only this URL changes between environments.
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
+# ─── Run artifact storage (S3) ─────────────────────────────────────────────────
+# Local dev / Docker Compose: leave S3_RUNS_BUCKET unset. Every report's files
+# (raw CSVs, merged xlsx, narrative HTML, snapshot zip, dashboard JSON) are
+# written to and served from RUNS_DIR on local disk, exactly as before.
+#
+# AWS: set S3_RUNS_BUCKET to the bucket created for this. Fargate's container
+# filesystem is wiped on every restart/redeploy, so runs/ can't live there —
+# backend/report/snapshot.py uploads each completed run's directory to this
+# bucket right after writing it locally, and backend/api/routes.py's file-
+# serving routes read from S3 instead of local disk whenever this is set.
+# The local write step still happens first either way (every existing
+# snapshot.py function is unchanged) — S3 upload is an added final step,
+# not a replacement for how files get created.
+S3_RUNS_BUCKET = os.getenv("S3_RUNS_BUCKET", "")
+AWS_REGION     = os.getenv("AWS_REGION", "eu-west-2")
+
 # ─── LoB Profiles ─────────────────────────────────────────────────────────────
 # assumed_expense_ratio: fixed cost per £ of premium for each LoB
 # loss_ratio_target    : upper bound before flagging deterioration

@@ -10,6 +10,22 @@ const SAMPLE_QUESTIONS = [
   "Which line had the highest loss ratio last week?",
 ];
 
+/**
+ * crypto.randomUUID() only exists in "secure contexts" — https:// or
+ * localhost. Plain http:// on a real domain/IP (e.g. a raw ALB DNS name
+ * before TLS is set up) silently has no crypto.randomUUID at all, which
+ * throws rather than degrading gracefully. These IDs are only used as
+ * React list keys / local message identity, never sent to the backend
+ * or relied on for anything security-sensitive, so a non-cryptographic
+ * fallback is fine — it just needs to be unique within one chat session.
+ */
+function localId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 interface ChatPanelContentProps {
   runId: string | null;
 }
@@ -27,9 +43,9 @@ export function ChatPanelContent({ runId }: ChatPanelContentProps) {
   async function send(question: string) {
     if (!question.trim() || sending) return;
 
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content: question };
+    const userMsg: ChatMessage = { id: localId(), role: "user", content: question };
     const pendingMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: localId(),
       role: "assistant",
       content: "",
       pending: true,

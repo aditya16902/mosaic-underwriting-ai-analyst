@@ -31,6 +31,7 @@ from backend.agents.text_to_sql.sql_executor import (
     format_result_as_markdown,
 )
 from backend.agents.text_to_sql.db_writer import get_db_schema, get_sample_rows
+from backend.storage.s3_runs import s3_enabled, download_file as s3_download_file
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
@@ -90,6 +91,41 @@ def _build_report_context(dashboard_data: dict) -> str:
     return "\n".join(lines)
 
 
+def _ensure_run_files_local(run_id: str) -> None:
+    """
+    SQLite can only query a file that physically exists on this container's
+    disk — it can't open merged_metrics.db directly out of S3. On AWS,
+    Fargate's disk doesn't survive a restart/redeploy, so a run generated
+    by an earlier container instance may have its files in S3 but not on
+    THIS container's disk. This downloads merged_metrics.db and
+    dashboard_data.json into the local runs/{run_id}/ path (creating it if
+    needed) if they're missing locally — a one-time cost per run, per
+    container instance, not per question asked.
+
+    No-op when S3 isn't configured (local dev / Docker Compose), since
+    local files are simply already there in that case.
+    """
+    if not s3_enabled():
+        return
+
+    run_dir = RUNS_DIR / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    for fname in ("merged_metrics.db", "dashboard_data.json"):
+        local_path = run_dir / fname
+        if local_path.exists():
+            continue
+        try:
+            s3_download_file(run_id, fname, local_path)
+        except FileNotFoundError as e:
+            # merged_metrics.db missing is fatal (caught by the .exists()
+            # check right after this runs, in _get_latest_run_data);
+            # dashboard_data.json missing is survivable — _build_report_context
+            # just gets an empty dict and the agent answers with less report
+            # context, not an error.
+            print(f"[Agent] Could not fetch {fname} for run {run_id} from S3: {e}")
+
+
 def _get_latest_run_data(run_id: Optional[str] = None) -> tuple:
     """
     Find the latest run's db path and dashboard_data.
@@ -97,9 +133,19 @@ def _get_latest_run_data(run_id: Optional[str] = None) -> tuple:
     Returns (db_path, dashboard_data) or (None, {}) if no runs exist.
     """
     if run_id:
+        _ensure_run_files_local(run_id)
         run_dir = RUNS_DIR / run_id
     else:
-        run_dirs = [d for d in RUNS_DIR.iterdir() if d.is_dir()]
+        # "Latest" without an explicit run_id only makes sense in terms of
+        # what's on local disk — on AWS, this is just whatever the CURRENT
+        # container instance has generated itself, which may not be the
+        # true latest report if another container instance generated a
+        # newer one. This is an existing, known characteristic of the
+        # "no run_id given" path rather than something this S3 change
+        # needs to solve: the frontend always passes the specific run_id
+        # the dashboard is currently showing (see ChatPanelContent.tsx),
+        # so this branch is a fallback, not the common path.
+        run_dirs = [d for d in RUNS_DIR.iterdir() if d.is_dir()] if RUNS_DIR.exists() else []
         if not run_dirs:
             return None, {}
         run_dir = max(run_dirs, key=lambda d: d.stat().st_mtime)

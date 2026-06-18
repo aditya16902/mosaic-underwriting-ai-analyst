@@ -4,7 +4,6 @@ Master Pipeline Orchestrator
 
 import secrets
 from datetime import datetime
-from pathlib import Path
 
 from backend.pipeline.ingestor    import ingest
 from backend.pipeline.signals     import detect_all_signals
@@ -13,25 +12,19 @@ from backend.pipeline.anomalies   import detect_all_anomalies
 from backend.pipeline.prioritiser import build_payload
 from backend.llm.chain            import run_llm_chain
 from backend.report.snapshot      import create_snapshot
-from backend.config               import DATA_DIR
 
 
 def _make_run_id(report_week: str) -> str:
     """
     Human-scannable, sortable run ID:  YYYYMMDD_HHMMSS_week<report_week>_<4charsuffix>
-
-    - Timestamp prefix sorts chronologically as plain strings (newest last).
-    - report_week makes the report's coverage visible without opening the run.
-    - 4-char random suffix guards against same-second double-triggers
-      (e.g. a double-click on "Generate Report" in the frontend).
     """
     now    = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    suffix = secrets.token_hex(2)  # 4 hex chars
+    suffix = secrets.token_hex(2)
     week   = report_week or "unknown"
     return f"{now}_week{week}_{suffix}"
 
 
-def run_pipeline(week_start=None, week_end=None, data_dir: Path = DATA_DIR, dry_run: bool = False) -> dict:
+def run_pipeline(week_start=None, week_end=None, dry_run: bool = False) -> dict:
     started_at = datetime.utcnow().isoformat() + "Z"
 
     print(f"\n{'='*60}")
@@ -40,7 +33,7 @@ def run_pipeline(week_start=None, week_end=None, data_dir: Path = DATA_DIR, dry_
     print('='*60)
 
     print("[L1] Ingesting and computing metrics...")
-    raw_dfs, df = ingest(data_dir=data_dir, week_start=week_start, week_end=week_end)
+    raw_dfs, df = ingest(week_start=week_start, week_end=week_end)
     print(f"[L1] Shape: {df.shape} | Weeks: {df['week_ending'].nunique()} | LoB: {df['lob'].nunique()}")
 
     report_week = df["week_ending"].max().strftime("%Y-%m-%d")

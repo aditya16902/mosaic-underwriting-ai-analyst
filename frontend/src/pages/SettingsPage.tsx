@@ -13,25 +13,52 @@ const DAYS: { value: string; label: string }[] = [
   { value: "sun", label: "Sunday" },
 ];
 
+// Browser's UTC offset in hours (e.g. BST = +1, EST = -5).
+// Intl.DateTimeFormat gives us the offset in minutes; we negate it because
+// JS getTimezoneOffset() returns minutes *behind* UTC (positive = behind),
+// so we flip it to get the conventional +/- ahead of UTC value.
+const LOCAL_OFFSET_HOURS = -new Date().getTimezoneOffset() / 60;
+
+// Detect the IANA timezone name for display (e.g. "Europe/London").
+const LOCAL_TZ_NAME = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/** Convert a UTC hour to local hour (wraps 0-23). */
+function utcToLocal(utcHour: number): number {
+  return ((utcHour + LOCAL_OFFSET_HOURS) % 24 + 24) % 24;
+}
+
+/** Convert a local hour back to UTC hour (wraps 0-23). */
+function localToUtc(localHour: number): number {
+  return ((localHour - LOCAL_OFFSET_HOURS) % 24 + 24) % 24;
+}
+
 export function SettingsPage() {
   const [config, setConfig] = useState<ScheduleConfig | null>(null);
+  // localHour is what the user sees/edits; we convert to/from UTC when loading/saving.
+  const [localHour, setLocalHour] = useState<number>(0);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api.get<ScheduleConfig>("/schedule").then(setConfig);
+    api.get<ScheduleConfig>("/schedule").then((cfg) => {
+      setConfig(cfg);
+      setLocalHour(utcToLocal(cfg.hour));
+    });
   }, []);
 
   async function save() {
     if (!config) return;
     setSaving(true);
     setSaved(false);
+    const utcHour = localToUtc(localHour);
     await api.put("/schedule", {
       enabled: !!config.enabled,
       day_of_week: config.day_of_week,
-      hour: config.hour,
+      hour: utcHour,
       minute: config.minute,
     });
+    // Keep stored config in sync with what we just saved (UTC).
+    setConfig({ ...config, hour: utcHour });
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
@@ -39,12 +66,19 @@ export function SettingsPage() {
 
   if (!config) return null;
 
+  // Offset label for display, e.g. "+1" or "-5".
+  const offsetLabel =
+    LOCAL_OFFSET_HOURS >= 0
+      ? `+${LOCAL_OFFSET_HOURS}`
+      : `${LOCAL_OFFSET_HOURS}`;
+
   return (
     <div className="max-w-xl mx-auto px-8 py-10">
       <h1 className="font-display text-2xl text-ink mb-1">Schedule settings</h1>
       <p className="text-sm text-warmgray mb-8 leading-relaxed">
-        Controls the automated weekly report. While running locally this fires from
-        the API process itself; in production this maps to a scheduled trigger.
+        Controls the automated weekly report. Times are shown in your local
+        timezone ({LOCAL_TZ_NAME}, UTC{offsetLabel}). The backend always fires
+        in UTC.
       </p>
 
       <div className="bg-panel border border-line rounded-lg p-5 space-y-5">
@@ -85,10 +119,12 @@ export function SettingsPage() {
             </select>
           </div>
           <div className="col-span-1">
-            <label className="text-xs text-warmgray block mb-1.5">Hour (UTC)</label>
+            <label className="text-xs text-warmgray block mb-1.5">
+              Hour ({LOCAL_TZ_NAME})
+            </label>
             <select
-              value={config.hour}
-              onChange={(e) => setConfig({ ...config, hour: Number(e.target.value) })}
+              value={localHour}
+              onChange={(e) => setLocalHour(Number(e.target.value))}
               disabled={!config.enabled}
               className="w-full border border-line rounded-md px-2.5 py-2 text-sm tabular bg-white disabled:opacity-50"
             >
@@ -115,6 +151,20 @@ export function SettingsPage() {
             </select>
           </div>
         </div>
+
+        {/* Show the UTC equivalent so there's no ambiguity */}
+        <p className="text-xs text-warmgray">
+          Fires at{" "}
+          <span className="font-medium text-ink tabular">
+            {String(localHour).padStart(2, "0")}:
+            {String(config.minute).padStart(2, "0")} {LOCAL_TZ_NAME}
+          </span>
+          {" "}={" "}
+          <span className="font-medium text-ink tabular">
+            {String(localToUtc(localHour)).padStart(2, "0")}:
+            {String(config.minute).padStart(2, "0")} UTC
+          </span>
+        </p>
 
         <div className="flex items-center gap-3 pt-1">
           <button

@@ -15,6 +15,7 @@ from openpyxl.utils import get_column_letter
 
 from backend.config import DATA_DIR, RUNS_DIR
 from backend.agents.text_to_sql.db_writer import write_metrics_db
+from backend.storage.s3_runs import upload_run_directory
 
 
 def _make_run_dir(run_id: str) -> Path:
@@ -195,6 +196,13 @@ def create_snapshot(run_id: str, df: pd.DataFrame, payload: dict, llm_chain: dic
     manifest["files"]["narrative_html"] = _write_narrative_html(llm_chain.get("narrative_html", ""), run_dir)
     manifest["files"]["dashboard_json"] = _write_dashboard_json(payload, llm_chain, run_dir)
     manifest["files"]["zip"]            = _write_zip(run_dir, run_id)
+
+    # Everything above writes to local disk exactly as before — this is
+    # the one new step. On local dev / Docker Compose (S3_RUNS_BUCKET
+    # unset) this is a no-op. On AWS, it uploads the now-complete run
+    # directory to S3, since Fargate's container filesystem doesn't
+    # survive a restart or redeploy the way local disk does.
+    upload_run_directory(run_dir, run_id)
 
     print(f"[Snapshot] Created: {run_dir}")
     return manifest

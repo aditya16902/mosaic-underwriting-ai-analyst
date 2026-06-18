@@ -1,6 +1,7 @@
 """
 Database setup — SQLAlchemy Core, runs against SQLite locally and
-Postgres on AWS with the SAME SQL. Tables: users, reports, schedule_config.
+Postgres on AWS with the SAME SQL. Tables: users, reports, schedule_config,
+raw_metrics.
 
 Why SQLAlchemy Core (not an ORM, not raw sqlite3/psycopg2):
 SQLite and Postgres disagree on several things this app actually uses —
@@ -10,7 +11,7 @@ information_schema). Writing raw SQL strings per-backend would mean two
 parallel implementations to keep in sync. SQLAlchemy Core's text()/table
 constructs handle the placeholder and dialect differences while staying
 close to plain SQL — there are no ORM models, no migration framework,
-since this app's three tables don't need that weight.
+since this app's tables don't need that weight.
 
 User accounts are NOT seeded here. There is no hardcoded username/password
 anywhere in this file or in code — accounts are created via
@@ -32,16 +33,14 @@ IS_SQLITE = DATABASE_URL.startswith("sqlite")
 def get_connection():
     """
     Returns a live SQLAlchemy connection. Caller is responsible for
-    conn.commit() after writes and conn.close() when done — this mirrors
-    the sqlite3 connection lifecycle the rest of the app was written
-    against, so call sites barely changed when this moved off sqlite3.
-
-    Row access: a fetched row supports both row["column"] (via
-    SQLAlchemy's Row.__getitem__ on string keys, available since 1.4)
-    and dict(row._mapping) for converting a whole row to a plain dict —
-    the same two access patterns routes.py already relies on.
+    conn.commit() after writes and conn.close() when done.
     """
     return _engine.connect()
+
+
+def get_engine():
+    """Expose the engine for pd.read_sql() calls in the pipeline."""
+    return _engine
 
 
 def _column_exists(conn, table: str, column: str) -> bool:
@@ -59,33 +58,38 @@ def _column_exists(conn, table: str, column: str) -> bool:
         return result is not None
 
 
+def _table_exists(conn, table: str) -> bool:
+    if IS_SQLITE:
+        result = conn.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:table"),
+            {"table": table},
+        ).fetchone()
+    else:
+        result = conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_name = :table"
+            ),
+            {"table": table},
+        ).fetchone()
+    return result is not None
+
+
 def _migrate(conn):
     """
     Lightweight in-place migrations for columns added after the original
-    CREATE TABLE was written. CREATE TABLE IF NOT EXISTS won't retroactively
-    alter a table that already exists, so new columns need an explicit
-    ALTER TABLE guarded by an existence check, on either backend.
+    CREATE TABLE was written.
     """
     if not _column_exists(conn, "reports", "source"):
-        # 'manual'    — triggered via the dashboard's Generate Report action
-        # 'automated' — triggered by the scheduled job (APScheduler locally, EventBridge on AWS)
         conn.execute(text("ALTER TABLE reports ADD COLUMN source TEXT DEFAULT 'manual'"))
         print("[DB] Migration: added reports.source column")
 
     if not _column_exists(conn, "users", "display_name"):
-        # Shown in the UI (e.g. "Signed in as Shambavi") instead of the
-        # full email address used as the login username.
         conn.execute(text("ALTER TABLE users ADD COLUMN display_name TEXT"))
         print("[DB] Migration: added users.display_name column")
 
 
 def _create_tables_sql() -> str:
-    """
-    Returns the CREATE TABLE statements for whichever backend is active.
-    The two versions differ only in the autoincrement/identity syntax and
-    the default-timestamp function — everything else is shared SQL valid
-    on both SQLite and Postgres.
-    """
     if IS_SQLITE:
         id_col      = "INTEGER PRIMARY KEY AUTOINCREMENT"
         now_default = "DEFAULT (datetime('now'))"
@@ -127,15 +131,33 @@ def _create_tables_sql() -> str:
             minute      INTEGER NOT NULL DEFAULT 0,
             updated_at  TIMESTAMP {now_default}
         );
+
+        CREATE TABLE IF NOT EXISTS raw_metrics (
+            week_ending                 DATE        NOT NULL,
+            lob                         TEXT        NOT NULL,
+            actual_gwp                  REAL,
+            plan_gwp                    REAL,
+            ytd_actual                  REAL,
+            ytd_plan                    REAL,
+            submissions_count           INTEGER,
+            quoted_count                INTEGER,
+            bound_count                 INTEGER,
+            declined_count              INTEGER,
+            ntu_count                   INTEGER,
+            open_quotes_count           INTEGER,
+            open_quotes_gwp_est         REAL,
+            avg_days_in_pipeline        REAL,
+            new_claims_count            INTEGER,
+            new_claims_incurred_est     REAL,
+            attritional_loss_ratio_ytd  REAL,
+            PRIMARY KEY (week_ending, lob)
+        );
     """
 
 
 def init_db():
-    """Create tables if they don't exist and run migrations. Does NOT seed any user."""
+    """Create tables if they don't exist and run migrations."""
     with _engine.begin() as conn:
-        # executescript-equivalent: SQLAlchemy's text() runs one statement
-        # at a time, so split on ';' rather than relying on a multi-statement
-        # execute (which psycopg2/Postgres won't accept the way sqlite3 did).
         for statement in _create_tables_sql().split(";"):
             statement = statement.strip()
             if statement:
@@ -143,10 +165,6 @@ def init_db():
 
         _migrate(conn)
 
-        # Seed default schedule row (single-row config table, id always 1).
-        # ON CONFLICT DO NOTHING is valid on both SQLite (3.24+) and Postgres —
-        # this is the one upsert-shaped statement that didn't need a
-        # backend-specific branch.
         conn.execute(
             text(
                 "INSERT INTO schedule_config (id, enabled, day_of_week, hour, minute) "

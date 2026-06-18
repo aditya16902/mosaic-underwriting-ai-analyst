@@ -18,19 +18,25 @@ from dotenv import load_dotenv
 # the caller having sourced it into the shell already.
 load_dotenv()
 
-import pandas as pd
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt, JWTError
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from backend.config import AUTH_CONFIG, RUNS_DIR, DATA_DIR, CORS_ORIGINS
+from backend.config import AUTH_CONFIG, RUNS_DIR, CORS_ORIGINS
 from backend.db.database import get_connection, init_db, IS_SQLITE
 from backend.auth.passwords import verify_password
 from backend.pipeline.orchestrator import run_pipeline
+from backend.storage.s3_runs import (
+    s3_enabled,
+    fetch_object_text,
+    presigned_download_url,
+    list_run_files,
+    delete_run_directory,
+)
 
 app = FastAPI(title="MosAIc API", version="1.0.0")
 
@@ -85,13 +91,6 @@ def verify_token_flexible(
     token: Optional[str] = None,
     bearer: Optional[str] = Depends(OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)),
 ) -> str:
-    """
-    Same as verify_token, but also accepts the JWT as a ?token= query param.
-    Needed for routes opened via plain browser navigation or <a download> —
-    window.open() and anchor downloads can't attach an Authorization header,
-    so the frontend passes the token in the URL for these specific routes only
-    (narrative view, snapshot zip download). All other routes stay header-only.
-    """
     candidate = token or bearer
     if not candidate:
         raise HTTPException(status_code=401, detail="Missing token")
@@ -100,8 +99,6 @@ def verify_token_flexible(
 
 @app.post("/auth/login")
 def login(form: OAuth2PasswordRequestForm = Depends()):
-    # Usernames are email addresses — normalise case so login isn't
-    # sensitive to how someone happens to capitalise their own email.
     username = form.username.strip().lower()
 
     conn = get_connection()
@@ -110,10 +107,6 @@ def login(form: OAuth2PasswordRequestForm = Depends()):
     ).mappings().fetchone()
     conn.close()
 
-    # Verify against a real row's hash if one exists; otherwise verify
-    # against a dummy hash anyway. This keeps the response time roughly
-    # the same whether or not the username exists, so a caller can't use
-    # timing to enumerate valid usernames.
     hash_to_check = user["password_hash"] if user else "$2b$12$" + "x" * 53
     valid = verify_password(form.password, hash_to_check)
 
@@ -141,14 +134,20 @@ def me(username: str = Depends(verify_token)):
 @app.get("/data/bounds")
 def get_data_bounds(username: str = Depends(verify_token)):
     """
-    Min/max week_ending available in the source CSVs, so the frontend's
+    Min/max week_ending available in raw_metrics, so the frontend's
     custom-range generate form can constrain the date picker to dates
     that actually exist rather than allowing an empty-result range.
     """
-    df = pd.read_csv(DATA_DIR / "case4_weekly_premium.csv", parse_dates=["week_ending"])
+    conn = get_connection()
+    row = conn.execute(
+        text("SELECT MIN(week_ending) AS min_week, MAX(week_ending) AS max_week FROM raw_metrics")
+    ).mappings().fetchone()
+    conn.close()
+    if not row or not row["min_week"]:
+        raise HTTPException(status_code=404, detail="No data found in raw_metrics table")
     return {
-        "min_week": df["week_ending"].min().strftime("%Y-%m-%d"),
-        "max_week": df["week_ending"].max().strftime("%Y-%m-%d"),
+        "min_week": str(row["min_week"]),
+        "max_week": str(row["max_week"]),
     }
 
 
@@ -160,22 +159,6 @@ class GenerateRequest(BaseModel):
 
 
 def _save_report(run_id: str, result: dict, week_start, week_end, source: str = "manual"):
-    """
-    week_start/week_end here are what the PERSON requested, which can both
-    be None for a "full latest data" generation. That's distinct from what
-    the pipeline actually analysed — result["report_week"] is the real last
-    week_ending in the data, computed in prioritiser.py regardless of
-    whether a range was given. When the person didn't specify an end date,
-    we still want the report's stored week_end to reflect the real data,
-    not be left NULL — otherwise the UI has nothing to show except
-    created_at (today's date), which is misleading: it makes "full latest
-    data, run today" look identical to "data as of today" rather than
-    "data as of whatever the latest week in the CSVs actually is".
-
-    Uses INSERT ... ON CONFLICT (run_id) DO UPDATE — valid on both SQLite
-    (3.24+) and Postgres, unlike SQLite's own INSERT OR REPLACE shorthand
-    which Postgres doesn't have.
-    """
     effective_week_end = week_end or result.get("report_week")
 
     conn = get_connection()
@@ -240,7 +223,7 @@ def generate_report(req: GenerateRequest, username: str = Depends(verify_token))
 
 
 def run_scheduled_report():
-    """Called by APScheduler at the configured day/time. Always full latest data, no filters."""
+    """Called by APScheduler at the configured day/time."""
     print("[Scheduler] Firing scheduled report generation...")
     result = run_pipeline(week_start=None, week_end=None)
     run_id = result["run_id"]
@@ -277,11 +260,6 @@ def get_report(run_id: str, username: str = Depends(verify_token)):
 
 @app.delete("/reports/{run_id}")
 def delete_report(run_id: str, username: str = Depends(verify_token)):
-    """
-    Permanently deletes a report: removes the DB row AND the entire run
-    directory on disk (raw CSVs, merged xlsx/db, narrative, snapshot zip,
-    dashboard JSON — everything create_snapshot() wrote). Irreversible.
-    """
     conn = get_connection()
     row = conn.execute(
         text("SELECT run_id FROM reports WHERE run_id = :run_id"), {"run_id": run_id}
@@ -298,6 +276,7 @@ def delete_report(run_id: str, username: str = Depends(verify_token)):
     if run_dir.exists():
         shutil.rmtree(run_dir)
 
+    delete_run_directory(run_id)
     return {"status": "deleted", "run_id": run_id}
 
 
@@ -305,6 +284,12 @@ def delete_report(run_id: str, username: str = Depends(verify_token)):
 
 @app.get("/reports/{run_id}/dashboard")
 def get_dashboard_data(run_id: str, username: str = Depends(verify_token)):
+    if s3_enabled():
+        try:
+            return json.loads(fetch_object_text(run_id, "dashboard_data.json"))
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Dashboard data not found")
+
     f = Path(RUNS_DIR) / run_id / "dashboard_data.json"
     if not f.exists():
         raise HTTPException(status_code=404, detail="Dashboard data not found")
@@ -315,6 +300,12 @@ def get_dashboard_data(run_id: str, username: str = Depends(verify_token)):
 
 @app.get("/reports/{run_id}/narrative", response_class=HTMLResponse)
 def get_narrative(run_id: str, username: str = Depends(verify_token_flexible)):
+    if s3_enabled():
+        try:
+            return HTMLResponse(content=fetch_object_text(run_id, "narrative_report.html"))
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Narrative not found")
+
     f = Path(RUNS_DIR) / run_id / "narrative_report.html"
     if not f.exists():
         raise HTTPException(status_code=404, detail="Narrative not found")
@@ -325,6 +316,14 @@ def get_narrative(run_id: str, username: str = Depends(verify_token_flexible)):
 
 @app.get("/reports/{run_id}/snapshot/files")
 def list_snapshot_files(run_id: str, username: str = Depends(verify_token)):
+    if s3_enabled():
+        files = list_run_files(run_id)
+        if not files:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        return [{"name": f["name"], "size_bytes": f["size_bytes"],
+                 "download_url": f"/reports/{run_id}/snapshot/download/{f['name']}"}
+                for f in sorted(files, key=lambda f: f["name"])]
+
     snapshot_dir = Path(RUNS_DIR) / run_id
     if not snapshot_dir.exists():
         raise HTTPException(status_code=404, detail="Snapshot not found")
@@ -335,6 +334,13 @@ def list_snapshot_files(run_id: str, username: str = Depends(verify_token)):
 
 @app.get("/reports/{run_id}/snapshot/download/{filename}")
 def download_snapshot_file(run_id: str, filename: str, username: str = Depends(verify_token)):
+    if s3_enabled():
+        try:
+            url = presigned_download_url(run_id, filename)
+            return RedirectResponse(url=url)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="File not found")
+
     file_path = Path(RUNS_DIR) / run_id / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
@@ -347,6 +353,13 @@ def download_snapshot_file(run_id: str, filename: str, username: str = Depends(v
 
 @app.get("/reports/{run_id}/snapshot/zip")
 def download_zip(run_id: str, username: str = Depends(verify_token_flexible)):
+    if s3_enabled():
+        try:
+            url = presigned_download_url(run_id, f"snapshot_{run_id}.zip")
+            return RedirectResponse(url=url)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="ZIP not found")
+
     zip_path = Path(RUNS_DIR) / run_id / f"snapshot_{run_id}.zip"
     if not zip_path.exists():
         raise HTTPException(status_code=404, detail="ZIP not found")
@@ -355,13 +368,13 @@ def download_zip(run_id: str, username: str = Depends(verify_token_flexible)):
                         media_type="application/zip")
 
 
-# ─── Schedule Config ───────────────────────────────────────────────────────────
+# ─── Schedule Config ──────────────────────────────────────────────────────────
 
 class ScheduleConfigRequest(BaseModel):
     enabled:     bool
-    day_of_week: str   # 'mon'..'sun', matches APScheduler cron trigger day_of_week values
-    hour:        int   # 0-23
-    minute:      int   # 0-59
+    day_of_week: str
+    hour:        int
+    minute:      int
 
 
 @app.get("/schedule")
@@ -400,14 +413,6 @@ def update_schedule(req: ScheduleConfigRequest, username: str = Depends(verify_t
 
 
 def _start_scheduler():
-    """
-    Local-dev-only scheduler. While the FastAPI process is running, this fires
-    run_scheduled_report() at the configured day/time using the persisted
-    schedule_config row. This is intentionally minimal and isolated —
-    on AWS this entire block is replaced by an EventBridge rule invoking a
-    Lambda/Fargate task directly, so the in-process job is a clean removal
-    rather than something later deployment work has to refactor around.
-    """
     global _scheduler
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -422,7 +427,6 @@ def _start_scheduler():
 
 
 def _refresh_scheduler_job():
-    """Re-read schedule_config and (re)register the cron job accordingly."""
     if _scheduler is None:
         return
 
@@ -455,18 +459,13 @@ def _refresh_scheduler_job():
 
 class ChatRequest(BaseModel):
     question:       str
-    run_id:          Optional[str] = None    # None = use latest report
-    session_id:      Optional[str] = None    # Langfuse session ID from dashboard
+    run_id:          Optional[str] = None
+    session_id:      Optional[str] = None
     prompt_version:  str = "v1"
 
 
 @app.post("/chat")
 def chat(req: ChatRequest, username: str = Depends(verify_token)):
-    """
-    Text-to-SQL agent endpoint.
-    Accepts a natural language question, queries the run's merged_metrics.db,
-    and returns a business-language answer + the SQL used + the raw result table.
-    """
     from backend.agents.text_to_sql.agent import run_agent
 
     result = run_agent(

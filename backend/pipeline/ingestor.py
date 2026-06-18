@@ -1,36 +1,30 @@
 """
 Layer 1 — Data Ingestor & Metric Calculator
+
+Raw data is sourced from the raw_metrics table in RDS/SQLite rather than
+flat CSV files. The CSV files remain in /data as the canonical source of
+truth for seeding (scripts/seed_raw_metrics.py reads them once to populate
+the DB), but the pipeline no longer reads them directly at runtime.
 """
 
 import pandas as pd
 import numpy as np
-from pathlib import Path
-from backend.config import DATA_DIR, LOB_PROFILES
-
-FILES = {
-    "submissions": "case4_weekly_submissions.csv",
-    "premium":     "case4_weekly_premium.csv",
-    "pipeline":    "case4_pipeline.csv",
-    "loss":        "case4_loss_indicators.csv",
-}
+from backend.config import LOB_PROFILES
+from backend.db.database import get_engine
 
 MERGE_KEYS = ["week_ending", "lob"]
 
 
-def load_raw(data_dir: Path = DATA_DIR) -> dict:
-    raw = {}
-    for key, fname in FILES.items():
-        df = pd.read_csv(data_dir / fname, parse_dates=["week_ending"])
-        df["week_ending"] = pd.to_datetime(df["week_ending"])
-        raw[key] = df
-    return raw
-
-
-def merge_tables(raw: dict) -> pd.DataFrame:
-    df = raw["premium"].copy()
-    for key in ("submissions", "pipeline", "loss"):
-        df = df.merge(raw[key], on=MERGE_KEYS, how="outer")
-    return df.sort_values(MERGE_KEYS).reset_index(drop=True)
+def load_raw() -> pd.DataFrame:
+    """
+    Read all rows from raw_metrics and return as a single merged DataFrame,
+    equivalent to the four-CSV merge the old load_raw()+merge_tables() did.
+    week_ending is parsed to datetime for consistency with downstream code.
+    """
+    engine = get_engine()
+    df = pd.read_sql("SELECT * FROM raw_metrics ORDER BY week_ending, lob", engine)
+    df["week_ending"] = pd.to_datetime(df["week_ending"])
+    return df
 
 
 def _get_lob_profile(lob: str) -> dict:
@@ -63,15 +57,25 @@ def compute_metrics(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def ingest(data_dir: Path = DATA_DIR, week_start=None, week_end=None) -> tuple:
-    raw    = load_raw(data_dir)
-    merged = merge_tables(raw)
-    merged = compute_metrics(merged)
+def ingest(week_start=None, week_end=None) -> tuple:
+    """
+    Load raw metrics from DB, compute derived metrics, apply optional
+    date filters, and return (raw_df, merged_df).
+
+    The returned 'raw' value is the same DataFrame as 'merged' before
+    metric computation — kept for API compatibility with callers that
+    unpack the two-tuple but only use the second element.
+    """
+    df = load_raw()
+    df = compute_metrics(df)
 
     if week_start:
-        merged = merged[merged["week_ending"] >= pd.to_datetime(week_start)]
+        df = df[df["week_ending"] >= pd.to_datetime(week_start)]
     if week_end:
-        merged = merged[merged["week_ending"] <= pd.to_datetime(week_end)]
+        df = df[df["week_ending"] <= pd.to_datetime(week_end)]
 
-    merged["week_num"] = merged.groupby("lob")["week_ending"].rank(method="dense").astype(int)
-    return raw, merged
+    df["week_num"] = df.groupby("lob")["week_ending"].rank(method="dense").astype(int)
+
+    # Return (raw, merged) to preserve the two-tuple contract orchestrator.py expects.
+    # Both point to the same DataFrame since the DB already stores the merged view.
+    return df, df
