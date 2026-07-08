@@ -30,42 +30,37 @@ def enrich_signal1_root_cause(df: pd.DataFrame, signal1_findings: list) -> list:
         latest_days       = grp["avg_days_in_pipeline"].iloc[-1]
         days_trend        = grp["avg_days_in_pipeline"].diff().mean()
 
+        # Only decline_rate is directly assertable as a root cause.
+        # NTU rate and pipeline days are ambiguous — high NTU could reflect
+        # pricing, terms, broker relationship, response speed, or other factors
+        # that this dataset cannot distinguish between. LOSING_TO_PRICE and
+        # MIXED have been removed as classifications because they overstate
+        # what the available data can support.
         too_selective = avg_decline_rate >= 0.25
-        losing_price  = avg_ntu_rate >= 0.25 or avg_days_pipeline >= 30
 
         window_label = (
             f"averaged over the most recent {n_recent} weeks "
             f"({_date_str(window_start)} – {_date_str(window_end)}), not the full {len(grp)}-week period"
         )
 
-        if too_selective and losing_price:
-            root_cause = "MIXED"
-            root_cause_detail = (
-                f"Both selectivity and pricing appear to be factors, {window_label}. "
-                f"Decline rate elevated at {avg_decline_rate:.1%} AND NTU rate is {avg_ntu_rate:.1%} "
-                f"with avg pipeline days of {avg_days_pipeline:.0f}."
-            )
-        elif too_selective:
+        if too_selective:
             root_cause = "TOO_SELECTIVE"
             root_cause_detail = (
                 f"Underwriting appetite appears too restrictive, {window_label}. "
-                f"Decline rate {avg_decline_rate:.1%}, while NTU rate remains modest at {avg_ntu_rate:.1%}. "
-                f"Deals are being turned away before pricing, not lost at quote stage."
-            )
-        elif losing_price:
-            root_cause = "LOSING_TO_PRICE"
-            root_cause_detail = (
-                f"Market pricing is likely more competitive, {window_label}. "
-                f"Decline rate low at {avg_decline_rate:.1%}, but NTU rate is {avg_ntu_rate:.1%} "
-                f"and avg days in pipeline is {avg_days_pipeline:.0f} days. "
-                f"Quotes sitting on broker desks — brokers likely shopping for cheaper alternatives."
+                f"Decline rate elevated at {avg_decline_rate:.1%} — deals are being turned away "
+                f"before reaching the quote stage. "
+                f"NTU rate is {avg_ntu_rate:.1%} and avg pipeline days is {avg_days_pipeline:.0f} "
+                f"(reported for context; the available data does not distinguish whether "
+                f"unconverted quotes reflect pricing, terms, broker relationship, or other factors)."
             )
         else:
             root_cause = "UNCLEAR"
             root_cause_detail = (
-                f"No dominant root cause identified, {window_label}. "
-                f"Decline rate {avg_decline_rate:.1%}, NTU rate {avg_ntu_rate:.1%}, "
-                f"pipeline days {avg_days_pipeline:.0f}."
+                f"No assertable root cause from available data, {window_label}. "
+                f"Decline rate {avg_decline_rate:.1%} (below the selectivity threshold of 25%). "
+                f"NTU rate is {avg_ntu_rate:.1%} and avg pipeline days is {avg_days_pipeline:.0f} — "
+                f"quotes are not converting but the available data does not distinguish between "
+                f"pricing, terms, broker relationship, or other causes."
             )
 
         finding = dict(finding)
@@ -103,8 +98,6 @@ def enrich_signal2_root_cause(df: pd.DataFrame, signal2_findings: list) -> list:
         n_window = finding["n_window_weeks"]
         n_baseline = len(hit_rates) - n_window
 
-        # Re-derive the date ranges for baseline and window from the same
-        # rows the detector used, so the disclosed dates are exact.
         dated = grp.loc[grp["hit_rate"].notna(), ["week_ending"]].reset_index(drop=True)
         baseline_start = dated["week_ending"].iloc[0]
         baseline_end   = dated["week_ending"].iloc[n_baseline - 1]
@@ -129,16 +122,14 @@ def enrich_signal2_root_cause(df: pd.DataFrame, signal2_findings: list) -> list:
 
         finding = dict(finding)
         finding.update({
-            "root_cause":          root_cause,
-            "root_cause_detail":   root_cause_detail,
+            "root_cause":            root_cause,
+            "root_cause_detail":     root_cause_detail,
             "baseline_window_weeks": int(n_baseline),
             "baseline_window_start": baseline_start.strftime("%Y-%m-%d"),
             "baseline_window_end":   baseline_end.strftime("%Y-%m-%d"),
             "recent_window_weeks":   int(n_window),
             "recent_window_start":   window_start.strftime("%Y-%m-%d"),
             "recent_window_end":     window_end.strftime("%Y-%m-%d"),
-            # Full hit-rate history (not just the window) so the dashboard
-            # can chart the whole trend, with the window clearly distinguishable.
             "hit_rate_history":      hit_rates.round(3).tolist(),
         })
         enriched.append(finding)
@@ -147,9 +138,8 @@ def enrich_signal2_root_cause(df: pd.DataFrame, signal2_findings: list) -> list:
 
 def enrich_signal3_root_cause(df: pd.DataFrame, signal3_findings: list) -> list:
     """
-    S3 (Deteriorating Loss Ratio Trend) similarly ships with a regression
-    slope and final value but no written explanation of the trend window
-    or how the estimated underwriting loss figure was derived.
+    S3 (Deteriorating Loss Ratio Trend) — discloses the full trend window
+    dates and makes the underwriting-loss arithmetic explicit.
     """
     enriched = []
     for finding in signal3_findings:
@@ -158,10 +148,10 @@ def enrich_signal3_root_cause(df: pd.DataFrame, signal3_findings: list) -> list:
         loss_series = grp["attritional_loss_ratio_ytd"].dropna().reset_index(drop=True)
         dated = grp.loc[grp["attritional_loss_ratio_ytd"].notna(), ["week_ending"]].reset_index(drop=True)
 
-        period_start = dated["week_ending"].iloc[0]
-        period_end   = dated["week_ending"].iloc[-1]
-        target       = finding["loss_ratio_target"]
-        final_value  = finding["final_loss_ratio"]
+        period_start  = dated["week_ending"].iloc[0]
+        period_end    = dated["week_ending"].iloc[-1]
+        target        = finding["loss_ratio_target"]
+        final_value   = finding["final_loss_ratio"]
         recent_consec = finding["recent_consecutive_positive_weeks"]
         combined      = finding["combined_ratio_ytd"]
         ytd_actual    = finding["ytd_actual_gwp"]

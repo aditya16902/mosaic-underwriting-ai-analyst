@@ -1,0 +1,26 @@
+# Lambda container image — used for BOTH the API handler and the
+# scheduler handler. Which handler Lambda invokes is set in the
+# function configuration (CMD override), not in this Dockerfile.
+#
+# Why a container image rather than a zip deployment?
+# The app's dependencies (pandas, scipy, numpy, psycopg2) are too
+# large for Lambda's 250MB zip limit. Container images support up
+# to 10GB, so this avoids any dependency-trimming gymnastics.
+
+FROM public.ecr.aws/lambda/python:3.11
+
+# Copy requirements and install dependencies into the Lambda task root.
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/
+RUN pip install -r ${LAMBDA_TASK_ROOT}/requirements.txt --target ${LAMBDA_TASK_ROOT}
+
+# Copy application code.
+COPY backend/    ${LAMBDA_TASK_ROOT}/backend/
+COPY data/       ${LAMBDA_TASK_ROOT}/data/
+COPY lambda_handler.py    ${LAMBDA_TASK_ROOT}/
+COPY lambda_scheduler.py  ${LAMBDA_TASK_ROOT}/
+COPY main.py     ${LAMBDA_TASK_ROOT}/
+
+# Default handler — overridden per-function in AWS console/CLI.
+# API function:       lambda_handler.handler
+# Scheduler function: lambda_scheduler.handler
+CMD ["lambda_handler.handler"]

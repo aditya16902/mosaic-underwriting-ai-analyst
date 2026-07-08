@@ -13,28 +13,19 @@ const DAYS: { value: string; label: string }[] = [
   { value: "sun", label: "Sunday" },
 ];
 
-// Browser's UTC offset in hours (e.g. BST = +1, EST = -5).
-// Intl.DateTimeFormat gives us the offset in minutes; we negate it because
-// JS getTimezoneOffset() returns minutes *behind* UTC (positive = behind),
-// so we flip it to get the conventional +/- ahead of UTC value.
 const LOCAL_OFFSET_HOURS = -new Date().getTimezoneOffset() / 60;
-
-// Detect the IANA timezone name for display (e.g. "Europe/London").
 const LOCAL_TZ_NAME = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-/** Convert a UTC hour to local hour (wraps 0-23). */
 function utcToLocal(utcHour: number): number {
   return ((utcHour + LOCAL_OFFSET_HOURS) % 24 + 24) % 24;
 }
 
-/** Convert a local hour back to UTC hour (wraps 0-23). */
 function localToUtc(localHour: number): number {
   return ((localHour - LOCAL_OFFSET_HOURS) % 24 + 24) % 24;
 }
 
 export function SettingsPage() {
   const [config, setConfig] = useState<ScheduleConfig | null>(null);
-  // localHour is what the user sees/edits; we convert to/from UTC when loading/saving.
   const [localHour, setLocalHour] = useState<number>(0);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -57,7 +48,6 @@ export function SettingsPage() {
       hour: utcHour,
       minute: config.minute,
     });
-    // Keep stored config in sync with what we just saved (UTC).
     setConfig({ ...config, hour: utcHour });
     setSaving(false);
     setSaved(true);
@@ -66,7 +56,6 @@ export function SettingsPage() {
 
   if (!config) return null;
 
-  // Offset label for display, e.g. "+1" or "-5".
   const offsetLabel =
     LOCAL_OFFSET_HOURS >= 0
       ? `+${LOCAL_OFFSET_HOURS}`
@@ -143,7 +132,7 @@ export function SettingsPage() {
               disabled={!config.enabled}
               className="w-full border border-line rounded-md px-2.5 py-2 text-sm tabular bg-white disabled:opacity-50"
             >
-              {[0, 15, 30, 45].map((m) => (
+              {Array.from({ length: 60 }, (_, m) => (
                 <option key={m} value={m}>
                   :{String(m).padStart(2, "0")}
                 </option>
@@ -152,7 +141,6 @@ export function SettingsPage() {
           </div>
         </div>
 
-        {/* Show the UTC equivalent so there's no ambiguity */}
         <p className="text-xs text-warmgray">
           Fires at{" "}
           <span className="font-medium text-ink tabular">
